@@ -1,0 +1,5 @@
+sounddevice==0.5.5
+pywin32==312
+torch==2.9.0
+transformers==5.14.1
+

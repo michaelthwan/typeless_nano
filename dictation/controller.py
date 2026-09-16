@@ -85,6 +85,12 @@ class OverlayControl(Protocol):
 
     def show_processing(self) -> None: ...
 
+    def show_notice(
+        self, text: str = "", target_window: int | None = None
+    ) -> None: ...
+
+    def show_rescue(self, text: str, target_window: int | None = None) -> None: ...
+
     def hide(self) -> None: ...
 
     def close(self) -> None: ...
@@ -156,6 +162,8 @@ class DictationController:
         elif event.kind is EventKind.ASR_FINISHED:
             if self.machine.finish_transcribing():
                 self.overlay.hide()
+                if event.error_code == "empty_transcript":
+                    self.overlay.show_notice()
                 LOGGER.info(
                     "state=idle event=asr_finished error=%s",
                     event.error_code or "none",
@@ -197,6 +205,7 @@ class DictationController:
             self.machine.cancel_recording()
             self._target_window = None
             self.overlay.hide()
+            self.overlay.show_notice()
             LOGGER.info("utterance_rejected reason=%s", str(exc))
             return
         except Exception as exc:
@@ -276,6 +285,9 @@ class DictationController:
                 else:
                     error_code = result.reason
                     LOGGER.warning("injection_skipped reason=%s", result.reason)
+                    # The text had nowhere to go. Keep it on screen rather
+                    # than dropping it; the panel owns it from here.
+                    self.overlay.show_rescue(transcript, target_window)
         except Exception as exc:
             error_code = type(exc).__name__
             LOGGER.error("transcription_failed error=%s", error_code)

@@ -88,7 +88,7 @@ class TextInjector:
         inserted = send_unicode_text(text)
         if inserted:
             return InjectionResult(True)
-        if self.clipboard_fallback and _copy_to_clipboard(text):
+        if self.clipboard_fallback and copy_to_clipboard(text):
             return InjectionResult(
                 False, copied_to_clipboard=True, reason="sendinput_failed"
             )
@@ -121,7 +121,7 @@ def send_unicode_text(text: str) -> bool:
     return int(sent) == input_count
 
 
-def _copy_to_clipboard(text: str) -> bool:
+def copy_to_clipboard(text: str) -> bool:
     try:
         win32clipboard.OpenClipboard()
         try:

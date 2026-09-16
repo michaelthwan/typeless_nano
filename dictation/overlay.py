@@ -15,12 +15,33 @@ import win32con
 import win32gui
 
 from dictation.events import AppEvent, EventKind
+from dictation.inject import copy_to_clipboard
 
 RECORDING_WIDTH = 132
 RECORDING_HEIGHT = 44
 THINKING_WIDTH = 102
 THINKING_HEIGHT = 36
 BOTTOM_MARGIN = 72
+
+# Rescue panel: shown when a transcript could not be typed anywhere, so the
+# text is never silently lost. It persists until the user copies or dismisses
+# it -- deliberately no timeout, since a timeout would lose the text again.
+RESCUE_WIDTH = 428
+RESCUE_PAD = 16
+RESCUE_HEADER_HEIGHT = 26
+RESCUE_BUTTON_ROW = 46
+RESCUE_MIN_TEXT_HEIGHT = 20
+RESCUE_MAX_TEXT_HEIGHT = 190
+RESCUE_COPY_WIDTH = 92
+RESCUE_COPY_HEIGHT = 30
+RESCUE_CLOSE_HIT = 34
+
+# Transient notice: shown when a dictation produced no words at all, so the
+# capsule never disappears in silence leaving the user unsure what happened.
+NOTICE_HEIGHT = 30
+NOTICE_PAD_X = 16
+NOTICE_SECONDS = 1.7
+NOTICE_EMPTY_TEXT = "No speech detected"
 
 TRANSPARENT = "#ff00ff"
 SHELL = "#090a0c"
@@ -47,12 +68,16 @@ class OverlayState(Enum):
     HIDDEN = auto()
     RECORDING = auto()
     PROCESSING = auto()
+    NOTICE = auto()
 
 
 class OverlayCommand(Enum):
     SHOW_RECORDING = auto()
     SHOW_PROCESSING = auto()
     HIDE = auto()
+    SHOW_NOTICE = auto()
+    SHOW_RESCUE = auto()
+    HIDE_RESCUE = auto()
     CLOSE = auto()
 
 
@@ -60,6 +85,7 @@ class OverlayCommand(Enum):
 class QueuedOverlayCommand:
     command: OverlayCommand
     target_window: int | None = None
+    text: str = ""
 
 
 class RecordingOverlay:
@@ -77,6 +103,16 @@ class RecordingOverlay:
         self._state = OverlayState.HIDDEN
         self._animation_started_at = time.monotonic()
         self._target_window: int | None = None
+        self._rescue_root: tk.Toplevel | None = None
+        self._rescue_canvas: tk.Canvas | None = None
+        self._rescue_hwnd: int | None = None
+        # Full transcript; what the panel draws may be visually clipped, but
+        # the clipboard always receives this whole string.
+        self._rescue_text = ""
+        self._rescue_height = 0
+        self._notice_text = ""
+        self._notice_size = (0, 0)
+        self._notice_until = 0.0
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -104,6 +140,25 @@ class RecordingOverlay:
 
     def hide(self) -> None:
         self._commands.put(QueuedOverlayCommand(OverlayCommand.HIDE))
+
+    def show_notice(
+        self, text: str = NOTICE_EMPTY_TEXT, target_window: int | None = None
+    ) -> None:
+        """Flash a small notice that disappears on its own."""
+        self._commands.put(
+            QueuedOverlayCommand(OverlayCommand.SHOW_NOTICE, target_window, text)
+        )
+
+    def show_rescue(self, text: str, target_window: int | None = None) -> None:
+        """Keep an un-typed transcript on screen instead of dropping it."""
+        self._commands.put(
+            QueuedOverlayCommand(
+                OverlayCommand.SHOW_RESCUE, target_window, text
+            )
+        )
+
+    def hide_rescue(self) -> None:
+        self._commands.put(QueuedOverlayCommand(OverlayCommand.HIDE_RESCUE))
 
     def close(self) -> None:
         if not self._thread:
@@ -142,7 +197,8 @@ class RecordingOverlay:
             # target its native top-level parent or the drawn canvas remains
             # hidden when the Tk root was withdrawn.
             self._hwnd = int(win32gui.GetParent(tk_child) or tk_child)
-            self._apply_non_activating_style()
+            self._apply_non_activating_style(self._hwnd)
+            self._build_rescue_window(root)
             self._draw_frame()
             self._ready.set()
             root.after(16, self._tick)
@@ -151,25 +207,60 @@ class RecordingOverlay:
             self._startup_error = exc
             self._ready.set()
         finally:
+            # Drop every Tk reference on the UI thread. A widget surviving
+            # past interpreter teardown is collected on the main thread and
+            # Tcl aborts with "async handler deleted by the wrong thread".
             self._root = None
             self._canvas = None
             self._hwnd = None
+            self._rescue_root = None
+            self._rescue_canvas = None
+            self._rescue_hwnd = None
 
-    def _apply_non_activating_style(self) -> None:
-        if not self._hwnd:
+    def _apply_non_activating_style(self, hwnd: int | None) -> None:
+        if not hwnd:
             return
-        style = _USER32.GetWindowLongW(self._hwnd, GWL_EXSTYLE)
+        style = _USER32.GetWindowLongW(hwnd, GWL_EXSTYLE)
         _USER32.SetWindowLongW(
-            self._hwnd,
+            hwnd,
             GWL_EXSTYLE,
             style | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         )
+
+    def _build_rescue_window(self, root: tk.Tk) -> None:
+        panel = tk.Toplevel(root)
+        panel.withdraw()
+        panel.overrideredirect(True)
+        panel.configure(background=SHELL)
+        panel.attributes("-topmost", True)
+        canvas = tk.Canvas(
+            panel,
+            width=RESCUE_WIDTH,
+            height=RESCUE_MIN_TEXT_HEIGHT,
+            background=SHELL,
+            highlightthickness=0,
+            borderwidth=0,
+        )
+        canvas.pack()
+        canvas.bind("<Button-1>", self._on_rescue_click)
+        canvas.bind("<Motion>", self._on_rescue_motion)
+        panel.update_idletasks()
+        tk_child = int(panel.winfo_id())
+        self._rescue_hwnd = int(win32gui.GetParent(tk_child) or tk_child)
+        self._apply_non_activating_style(self._rescue_hwnd)
+        self._rescue_root = panel
+        self._rescue_canvas = canvas
 
     def _tick(self) -> None:
         root = self._root
         if root is None:
             return
         self._drain_commands()
+        if (
+            self._state is OverlayState.NOTICE
+            and time.monotonic() >= self._notice_until
+        ):
+            self._hide()
         if self._state is not OverlayState.HIDDEN:
             self._draw_frame()
         if self._root is not None:
@@ -194,8 +285,18 @@ class RecordingOverlay:
                     self._show(self._target_window)
             elif queued.command is OverlayCommand.HIDE:
                 self._hide()
+            elif queued.command is OverlayCommand.SHOW_NOTICE:
+                self._show_notice(queued.text, queued.target_window)
+            elif queued.command is OverlayCommand.SHOW_RESCUE:
+                self._show_rescue(queued.text, queued.target_window)
+            elif queued.command is OverlayCommand.HIDE_RESCUE:
+                self._hide_rescue()
             elif queued.command is OverlayCommand.CLOSE:
                 self._hide()
+                self._hide_rescue()
+                if self._rescue_root is not None:
+                    self._rescue_root.destroy()
+                    self._rescue_root = None
                 if self._root is not None:
                     self._root.quit()
                     self._root.destroy()
@@ -231,6 +332,9 @@ class RecordingOverlay:
         if canvas is None:
             return
         canvas.delete("all")
+        if self._state is OverlayState.NOTICE:
+            self._draw_notice(canvas)
+            return
         if self._state is OverlayState.PROCESSING:
             self._draw_thinking(canvas)
             return
@@ -341,6 +445,8 @@ class RecordingOverlay:
             )
 
     def _window_size(self) -> tuple[int, int]:
+        if self._state is OverlayState.NOTICE:
+            return self._notice_size
         if self._state is OverlayState.PROCESSING:
             return THINKING_WIDTH, THINKING_HEIGHT
         return RECORDING_WIDTH, RECORDING_HEIGHT
@@ -359,6 +465,205 @@ class RecordingOverlay:
             self.events.put(
                 AppEvent(EventKind.STOP_RECORDING, source="overlay_done")
             )
+
+    def _show_notice(self, text: str, target_window: int | None) -> None:
+        canvas = self._canvas
+        if canvas is None or not text:
+            return
+        probe = canvas.create_text(
+            0, 0, text=text, font=("Segoe UI", 9), anchor=tk.NW
+        )
+        bounds = canvas.bbox(probe)
+        canvas.delete(probe)
+        text_width = (bounds[2] - bounds[0]) if bounds else 120
+        self._notice_text = text
+        self._notice_size = (int(text_width + (NOTICE_PAD_X * 2)), NOTICE_HEIGHT)
+        self._state = OverlayState.NOTICE
+        self._notice_until = time.monotonic() + NOTICE_SECONDS
+        self._show(target_window)
+        self._draw_frame()
+
+    def _draw_notice(self, canvas: tk.Canvas) -> None:
+        width, height = self._notice_size
+        _rounded_rectangle(
+            canvas, 1, 1, width - 1, height - 1, radius=14, fill=BORDER
+        )
+        _rounded_rectangle(
+            canvas, 2, 2, width - 2, height - 2, radius=13, fill=SHELL
+        )
+        canvas.create_text(
+            width / 2,
+            height / 2,
+            text=self._notice_text,
+            fill=ICON_MUTED,
+            font=("Segoe UI", 9),
+            anchor=tk.CENTER,
+        )
+
+    def _show_rescue(self, text: str, target_window: int | None) -> None:
+        panel = self._rescue_root
+        canvas = self._rescue_canvas
+        if panel is None or canvas is None or not text:
+            return
+        self._rescue_text = text
+        height = self._measure_rescue(canvas, text)
+        self._rescue_height = height
+
+        left, _top, right, bottom = monitor_work_area(target_window)
+        x = left + ((right - left - RESCUE_WIDTH) // 2)
+        y = bottom - height - BOTTOM_MARGIN
+        canvas.configure(width=RESCUE_WIDTH, height=height)
+        panel.geometry(f"{RESCUE_WIDTH}x{height}+{x}+{y}")
+        panel.update_idletasks()
+        self._draw_rescue()
+        if self._rescue_hwnd:
+            win32gui.SetWindowPos(
+                self._rescue_hwnd,
+                win32con.HWND_TOPMOST,
+                x,
+                y,
+                RESCUE_WIDTH,
+                height,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            )
+
+    def _hide_rescue(self) -> None:
+        self._rescue_text = ""
+        if self._rescue_hwnd:
+            win32gui.ShowWindow(self._rescue_hwnd, win32con.SW_HIDE)
+
+    def _measure_rescue(self, canvas: tk.Canvas, text: str) -> int:
+        """Size the panel to the transcript, clamped so it cannot fill the screen."""
+        probe = canvas.create_text(
+            0,
+            0,
+            text=text,
+            width=RESCUE_WIDTH - (RESCUE_PAD * 2),
+            font=("Segoe UI", 10),
+            anchor=tk.NW,
+        )
+        bounds = canvas.bbox(probe)
+        canvas.delete(probe)
+        text_height = (bounds[3] - bounds[1]) if bounds else RESCUE_MIN_TEXT_HEIGHT
+        text_height = max(
+            RESCUE_MIN_TEXT_HEIGHT, min(RESCUE_MAX_TEXT_HEIGHT, text_height)
+        )
+        return int(
+            RESCUE_PAD
+            + RESCUE_HEADER_HEIGHT
+            + text_height
+            + RESCUE_BUTTON_ROW
+            + RESCUE_PAD
+        )
+
+    def _draw_rescue(self) -> None:
+        canvas = self._rescue_canvas
+        if canvas is None:
+            return
+        height = self._rescue_height
+        canvas.delete("all")
+        _rounded_rectangle(
+            canvas, 1, 1, RESCUE_WIDTH - 1, height - 1, radius=15, fill=BORDER
+        )
+        _rounded_rectangle(
+            canvas, 2, 2, RESCUE_WIDTH - 2, height - 2, radius=14, fill=SHELL
+        )
+
+        canvas.create_text(
+            RESCUE_PAD,
+            RESCUE_PAD,
+            text="Nowhere to type - text kept here",
+            fill=ICON_MUTED,
+            font=("Segoe UI", 9),
+            anchor=tk.NW,
+        )
+
+        close_x = RESCUE_WIDTH - RESCUE_PAD - 7
+        close_y = RESCUE_PAD + 6
+        for x1, y1, x2, y2 in (
+            (close_x - 5, close_y - 5, close_x + 5, close_y + 5),
+            (close_x + 5, close_y - 5, close_x - 5, close_y + 5),
+        ):
+            canvas.create_line(
+                x1, y1, x2, y2, fill=ICON_MUTED, width=2, capstyle=tk.ROUND
+            )
+
+        text_top = RESCUE_PAD + RESCUE_HEADER_HEIGHT
+        text_area = height - RESCUE_PAD - RESCUE_BUTTON_ROW - text_top
+        canvas.create_text(
+            RESCUE_PAD,
+            text_top,
+            text=self._rescue_text,
+            fill=ICON,
+            width=RESCUE_WIDTH - (RESCUE_PAD * 2),
+            font=("Segoe UI", 10),
+            anchor=tk.NW,
+        )
+        # A long transcript is visually clipped; the clipboard still gets all
+        # of it, so say so rather than letting the user think it was cut.
+        if text_area >= RESCUE_MAX_TEXT_HEIGHT:
+            canvas.create_rectangle(
+                2,
+                text_top + text_area - 16,
+                RESCUE_WIDTH - 2,
+                text_top + text_area,
+                fill=SHELL,
+                outline="",
+            )
+            canvas.create_text(
+                RESCUE_PAD,
+                text_top + text_area - 14,
+                text="... copy to get the full text",
+                fill=ICON_MUTED,
+                font=("Segoe UI", 8),
+                anchor=tk.NW,
+            )
+
+        button_left = RESCUE_WIDTH - RESCUE_PAD - RESCUE_COPY_WIDTH
+        button_top = height - RESCUE_PAD - RESCUE_COPY_HEIGHT
+        _rounded_rectangle(
+            canvas,
+            button_left,
+            button_top,
+            button_left + RESCUE_COPY_WIDTH,
+            button_top + RESCUE_COPY_HEIGHT,
+            radius=8,
+            fill=ICON,
+        )
+        canvas.create_text(
+            button_left + (RESCUE_COPY_WIDTH / 2),
+            button_top + (RESCUE_COPY_HEIGHT / 2),
+            text="Copy",
+            fill="#111317",
+            font=("Segoe UI", 10, "bold"),
+            anchor=tk.CENTER,
+        )
+
+    def _rescue_hit(self, x: float, y: float) -> str:
+        height = self._rescue_height
+        if x >= RESCUE_WIDTH - RESCUE_CLOSE_HIT and y <= RESCUE_CLOSE_HIT:
+            return "close"
+        button_left = RESCUE_WIDTH - RESCUE_PAD - RESCUE_COPY_WIDTH
+        button_top = height - RESCUE_PAD - RESCUE_COPY_HEIGHT
+        if x >= button_left and y >= button_top:
+            return "copy"
+        return ""
+
+    def _on_rescue_click(self, event: tk.Event) -> None:
+        if not self._rescue_text:
+            return
+        action = self._rescue_hit(event.x, event.y)
+        if action == "copy":
+            copy_to_clipboard(self._rescue_text)
+            self._hide_rescue()
+        elif action == "close":
+            self._hide_rescue()
+
+    def _on_rescue_motion(self, event: tk.Event) -> None:
+        if self._rescue_canvas is None:
+            return
+        hit = self._rescue_hit(event.x, event.y)
+        self._rescue_canvas.configure(cursor="hand2" if hit else "")
 
     def _on_motion(self, event: tk.Event) -> None:
         if self._canvas is None:

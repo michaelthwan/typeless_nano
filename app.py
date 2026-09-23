@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     injector = TextInjector(clipboard_fallback=config.clipboard_fallback)
     cues = SoundCuePlayer(enabled=config.sound_cues)
     hotkey = WindowsHotkeyHook(event_queue)
-    overlay = RecordingOverlay(event_queue)
+    overlay = RecordingOverlay(event_queue, level_source=lambda: recorder.level)
     controller = DictationController(
         config=config,
         events=event_queue,

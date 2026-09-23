@@ -28,6 +28,10 @@ class AppConfig:
     min_seconds: float = 0.25
     silence_rms: float = 0.001
     block_size: int = 1_600
+    # Waveform meter: block RMS in dBFS mapped linearly onto bar height 0..1.
+    # Floor sits just above typical room noise (about -47 dBFS measured).
+    meter_floor_db: float = -45.0
+    meter_ceiling_db: float = -20.0
     language: str = "English"
     vocabulary_prompt: str = DEFAULT_VOCABULARY_PROMPT
     max_new_tokens: int = 256

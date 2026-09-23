@@ -6,6 +6,8 @@ import queue
 import threading
 import time
 import tkinter as tk
+from collections import deque
+from collections.abc import Callable
 from ctypes import wintypes
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -22,6 +24,14 @@ RECORDING_HEIGHT = 44
 THINKING_WIDTH = 102
 THINKING_HEIGHT = 36
 BOTTOM_MARGIN = 72
+
+# Recording waveform: a scrolling level history. Each bar is one mic level
+# sample; a new sample enters at the right every LEVEL_SAMPLE_SECONDS and the
+# older ones shift left. Silence sits at BAR_MIN_HEIGHT.
+BAR_COUNT = 12
+BAR_MIN_HEIGHT = 4.0
+BAR_MAX_EXTRA = 15.0
+LEVEL_SAMPLE_SECONDS = 0.1
 
 # Rescue panel: shown when a transcript could not be typed anywhere, so the
 # text is never silently lost. It persists until the user copies or dismisses
@@ -91,8 +101,16 @@ class QueuedOverlayCommand:
 class RecordingOverlay:
     """A non-activating Windows recording capsule hosted on its own UI thread."""
 
-    def __init__(self, events: queue.Queue[AppEvent]) -> None:
+    def __init__(
+        self,
+        events: queue.Queue[AppEvent],
+        level_source: Callable[[], float] | None = None,
+    ) -> None:
         self.events = events
+        # Polled on the UI thread each frame; returns live mic loudness 0..1.
+        self._level_source = level_source
+        self._levels = LevelHistory(BAR_COUNT)
+        self._next_sample_at = 0.0
         self._commands: queue.Queue[QueuedOverlayCommand] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
@@ -276,6 +294,8 @@ class RecordingOverlay:
             if queued.command is OverlayCommand.SHOW_RECORDING:
                 self._state = OverlayState.RECORDING
                 self._animation_started_at = time.monotonic()
+                self._levels.clear()
+                self._next_sample_at = 0.0
                 self._target_window = queued.target_window
                 self._show(queued.target_window)
             elif queued.command is OverlayCommand.SHOW_PROCESSING:
@@ -377,16 +397,29 @@ class RecordingOverlay:
         )
         self._draw_waveform(canvas)
 
+    def _sample_level(self) -> None:
+        now = time.monotonic()
+        if now < self._next_sample_at:
+            return
+        self._next_sample_at = now + LEVEL_SAMPLE_SECONDS
+        level = 0.0
+        if self._level_source is not None:
+            try:
+                level = self._level_source()
+            except Exception:
+                level = 0.0
+        self._levels.push(level)
+
     def _draw_waveform(self, canvas: tk.Canvas) -> None:
         elapsed = time.monotonic() - self._animation_started_at
         center_y = RECORDING_HEIGHT / 2
-        bar_count = 12
-        for index in range(bar_count):
+        if self._state is OverlayState.RECORDING:
+            self._sample_level()
+        levels = self._levels.values()
+        for index in range(BAR_COUNT):
             x = 47 + (index * 3.6)
             if self._state is OverlayState.RECORDING:
-                phase = (elapsed * 8.0) + (index * 0.83)
-                envelope = 0.55 + (0.45 * math.sin(index * 1.31) ** 2)
-                height = 4.0 + abs(math.sin(phase)) * 13.0 * envelope
+                height = BAR_MIN_HEIGHT + (BAR_MAX_EXTRA * levels[index])
                 color = ICON
             else:
                 phase = (elapsed * 3.2) - (index * 0.48)
@@ -673,6 +706,23 @@ class RecordingOverlay:
             and (event.x <= 42 or event.x >= 90)
         )
         self._canvas.configure(cursor="hand2" if interactive else "")
+
+
+class LevelHistory:
+    """Fixed-length mic level history; oldest first, newest last (rightmost bar)."""
+
+    def __init__(self, size: int) -> None:
+        self._values: deque[float] = deque([0.0] * size, maxlen=size)
+
+    def push(self, level: float) -> None:
+        self._values.append(min(1.0, max(0.0, level)))
+
+    def clear(self) -> None:
+        for _ in range(len(self._values)):
+            self._values.append(0.0)
+
+    def values(self) -> tuple[float, ...]:
+        return tuple(self._values)
 
 
 def monitor_work_area(target_window: int | None) -> tuple[int, int, int, int]:

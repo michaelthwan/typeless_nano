@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import queue
 import threading
 from dataclasses import dataclass
@@ -41,6 +42,9 @@ class AudioRecorder:
         self._stream: Any | None = None
         self._lock = threading.Lock()
         self._callback_error: str | None = None
+        # Latest block loudness in 0..1, written by the audio callback and read
+        # by the overlay thread; a single float store is atomic under the GIL.
+        self._level = 0.0
 
     @staticmethod
     def list_devices() -> Any:
@@ -52,6 +56,7 @@ class AudioRecorder:
                 raise AudioError("recording_already_active")
             self._clear_blocks()
             self._callback_error = None
+            self._level = 0.0
             self._stream = sd.InputStream(
                 samplerate=self.config.sample_rate,
                 channels=self.config.channels,
@@ -71,6 +76,7 @@ class AudioRecorder:
         with self._lock:
             stream = self._stream
             self._stream = None
+        self._level = 0.0
 
         if stream is None:
             if discard:
@@ -114,6 +120,11 @@ class AudioRecorder:
         with self._lock:
             return self._stream is not None
 
+    @property
+    def level(self) -> float:
+        """Loudness of the most recent microphone block, 0 (silent) to 1."""
+        return self._level
+
     def discard_buffered_audio(self) -> None:
         """Drop audio captured during the short recording-start cue."""
         self._clear_blocks()
@@ -128,6 +139,11 @@ class AudioRecorder:
         del frames, time_info
         if status:
             self._callback_error = "audio_callback_status"
+        self._level = meter_level(
+            block_rms(indata),
+            floor_db=self.config.meter_floor_db,
+            ceiling_db=self.config.meter_ceiling_db,
+        )
         try:
             self._blocks.put_nowait(indata.copy())
         except queue.Full:
@@ -149,6 +165,21 @@ class AudioRecorder:
                 return blocks
 
 
+def block_rms(block: np.ndarray) -> float:
+    if block.size == 0:
+        return 0.0
+    rms = float(np.sqrt(np.mean(np.square(block, dtype=np.float64))))
+    return rms if np.isfinite(rms) else 0.0
+
+
+def meter_level(rms: float, *, floor_db: float, ceiling_db: float) -> float:
+    """Map an RMS amplitude onto 0..1 on a dBFS scale, clamped at both ends."""
+    if rms <= 0.0:
+        return 0.0
+    db = 20.0 * math.log10(rms)
+    return min(1.0, max(0.0, (db - floor_db) / (ceiling_db - floor_db)))
+
+
 def validate_audio(
     audio: np.ndarray,
     *,
@@ -162,7 +193,7 @@ def validate_audio(
     seconds = samples / sample_rate
     if seconds < min_seconds:
         raise AudioTooShortError("utterance_too_short")
-    rms = float(np.sqrt(np.mean(np.square(audio, dtype=np.float64))))
-    if not np.isfinite(rms) or rms < silence_rms:
+    rms = block_rms(audio)
+    if rms < silence_rms:
         raise SilentAudioError("utterance_is_silent")
     return AudioStats(seconds=seconds, rms=rms, samples=samples)

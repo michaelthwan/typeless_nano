@@ -2,46 +2,61 @@
 
 *English | [繁體中文](README.zh-TW.md)*
 
-A local English dictation MVP for Windows. Press Right Alt once to start recording and again
-to stop. A local Qwen3-ASR or Whisper model transcribes the audio, and the result is typed
-into the window that was active when you started.
+Offline English dictation for Windows. Press **Right Alt**, speak, press **Right Alt** again --
+the text is typed into whatever window you were in. Speech recognition runs entirely on your
+machine with Whisper or Qwen3-ASR; nothing is sent anywhere and nothing is saved to disk.
 
-While recording, a floating capsule appears at the bottom centre of the current screen without
-stealing focus: `×` on the left cancels, a waveform in the middle shows that recording is
-active, and `✓` on the right finishes the recording. After stopping, the capsule shrinks to a
-`Thinking` state and stays until transcription and text injection are complete.
+<p align="center">
+  <img src="docs/images/recording.png" width="176" alt="Recording capsule with live waveform">
+</p>
 
-Entering recording plays a soft rising two-note cue, leaving recording plays the same pair
-falling, and cancelling plays a single low note -- the Discord join/leave feel. The cues are
-sine tones synthesised at startup and played through Python's built-in `winsound`, so they add
-no extra dependency and ship no third-party audio file. Microphone blocks captured while the
-start cue is playing are discarded before the real recording begins.
+## Features
 
-PyWin32 312 does not wrap the three low-level hook functions directly, so `hotkey.py` calls the
-native `SetWindowsHookExW`, `CallNextHookEx` and `UnhookWindowsHookEx` through `ctypes`.
-PyWin32 still handles the Windows message loop, the foreground window and session notifications.
+- **One key, toggle to record.** Right Alt starts and stops. Every other key -- including F1
+  and Left Alt -- passes through untouched.
+- **Types where you were.** The text goes to the window that was in front when you started.
+  If you switched windows in the meantime, nothing is typed into the wrong place.
+- **Never loses your words.** If the text cannot be typed, it waits in a small panel with a
+  `Copy` button until you deal with it.
+- **Live waveform.** The recording capsule shows your actual microphone level, scrolling
+  right to left, so you can see at a glance that the mic is picking you up.
+- **Fully offline.** Models load from a local folder only; the runtime makes no network calls.
+- **Small footprint.** Four direct dependencies, one Python process, no installer.
+
+## What you will see
+
+| State | Looks like | What it means |
+|---|---|---|
+| Recording | <img src="docs/images/recording.png" width="176" alt="Recording capsule"> | Speak now. The bars follow your voice. `×` cancels, `✓` finishes. |
+| Thinking | <img src="docs/images/thinking.png" width="146" alt="Thinking capsule"> | Transcribing. The text is typed as soon as it is done. |
+| No speech | <img src="docs/images/no-speech.png" width="183" alt="No speech notice"> | The recording was silent or too short. Fades by itself. |
+| Nowhere to type | <img src="docs/images/rescue.png" width="472" alt="Rescue panel with Copy button"> | The target window is gone or changed. `Copy` puts the text on the clipboard. |
+
+None of these windows take focus, so the app you are typing into stays active. Short sound
+cues mark the transitions: a rising two-note chime to start, the same pair falling to stop,
+and a single low note to cancel.
 
 ## Quick start
 
-Minimal path from nothing to a running app. Python 3.12 on Windows.
+Requires Windows and Python 3.12.
+
+**1. Install**
 
 ```powershell
 python -m venv .venv
-.venv\Scriptsctivate
+.venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Download the Whisper model. The `hf` CLI ships with `huggingface_hub`, which pip already
-installed as a dependency of `transformers`:
+**2. Get a model** (the only step that touches the internet)
 
 ```powershell
 hf download openai/whisper-small.en --local-dir models\whisper-small.en
 ```
 
-If that machine has no access to the Hub, download the files by hand from
-<https://huggingface.co/openai/whisper-small.en/tree/main> and put them in
-`models\whisper-small.en`. You need every file except the `.gitattributes` and the `.msgpack`
-/ `.h5` / `.ot` weights, which are for other frameworks:
+No Hub access on that machine? Download the files by hand from
+<https://huggingface.co/openai/whisper-small.en/tree/main> into `models\whisper-small.en`.
+You need these; skip `.gitattributes` and the `.msgpack` / `.h5` / `.ot` weights:
 
 ```text
 config.json  generation_config.json  merges.txt  model.safetensors
@@ -49,16 +64,15 @@ normalizer.json  preprocessor_config.json  special_tokens_map.json
 tokenizer.json  tokenizer_config.json  vocab.json  added_tokens.json
 ```
 
-Run it:
+**3. Run** (from the project folder -- model paths are relative to it)
 
 ```powershell
 python app.py
 ```
 
-The app itself never downloads anything -- it runs with `HF_HUB_OFFLINE=1` and loads only from
-the local folder. The download step above is the one and only time the Hub is contacted.
+Wait for `Typeless Nano is ready.`, click into any text box, and press Right Alt.
 
-Conda instead of venv, if you prefer (see [Environment](#environment) for the full version):
+Using Conda instead:
 
 ```powershell
 conda create -n typeless_nano python=3.12 pip -y
@@ -66,49 +80,35 @@ conda run -n typeless_nano python -m pip install -r requirements.txt
 conda run --no-capture-output -n typeless_nano python app.py
 ```
 
-## Safety and privacy
+Keep `--no-capture-output`; without it Conda buffers the console and the app looks frozen.
 
-- The runtime forces `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`.
-- All models are loaded with `local_files_only=True`.
-- Audio exists only in RAM; the program never writes audio or transcripts to disk.
-- Logs contain only state, latency and error codes -- never transcript text.
-- After ASR finishes, the foreground window is checked again; if it changed, nothing is typed.
-  The transcript is not discarded: it stays in a floating panel (see below).
-- If `SendInput` fails, the text is copied to the clipboard by default. Disable this with
-  `--no-clipboard-fallback`.
+## Using it
 
-## When there is nowhere to type
+1. Put the cursor where you want the text.
+2. Press **Right Alt** and speak English.
+3. Press **Right Alt** again, or click `✓`.
+4. Stay in the same window until the text appears.
 
-If the transcript cannot be inserted -- the original window is gone, or the foreground window
-changed while ASR was running -- the text is no longer lost. A floating panel appears at the
-bottom of the screen holding the transcript, with a `Copy` button that copies it and closes the
-panel, and an `×` that dismisses it without touching the clipboard. The panel does not take
-focus and has no timeout, so it waits until you deal with it.
+Click `×` to throw away a recording. Recordings stop automatically after 60 seconds and are
+transcribed as usual. Press `Ctrl+C` in the console to quit.
 
-A long transcript is visually clipped in the panel, but `Copy` always yields the whole text.
-The panel is in-memory only and is lost if you quit the app with `Ctrl+C` while it is open.
+## Options
 
-If a dictation produced no words at all -- silence, a recording too short to use, or an ASR
-result with no text -- a small dark `No speech detected` notice appears instead and fades after
-about 1.7 seconds. It needs no interaction and there is nothing to recover.
+| Option | Effect |
+|---|---|
+| `--model auto\|qwen\|whisper` | Which model to use. `auto` (default) prefers Qwen and falls back to Whisper if Qwen is missing or fails to load. |
+| `--model-path PATH` | Load the chosen model from a different folder. |
+| `--device auto\|cpu\|cuda` | Where to run the model. CUDA falls back to CPU on out-of-memory. |
+| `--microphone NAME_OR_INDEX` | Pick a microphone. See `--list-microphones`. |
+| `--list-microphones` | Print input devices and exit. |
+| `--mute-cues` | Turn off the start/stop sounds. |
+| `--no-clipboard-fallback` | If typing fails, do not copy the text to the clipboard. |
+| `--new-paragraph` | Turn the spoken phrase "new paragraph" into a line break. |
+| `--verify-checksums` | Check model files against pinned SHA-256 hashes before loading. |
 
-## Environment
+## Models
 
-```powershell
-conda create -n typeless_nano python=3.12 pip -y
-conda run -n typeless_nano python -m pip install -r requirements.txt
-conda run -n typeless_nano python scripts/dependency_gate.py
-```
-
-`requirements.txt` contains only the four company-approved direct dependencies. NumPy is
-installed through the dependency graph of `sounddevice`, `torch` or `transformers`, and the
-program uses it directly to handle in-memory audio. `dependency_gate.py` reports the actual
-NumPy version along with the transitive requirements declared by Transformers, so they can be
-checked against the company allowlist.
-
-## Local model layout
-
-Model checkpoints must be approved first, then placed in one of these local folders:
+The app never downloads models. Put approved checkpoints here:
 
 ```text
 models/
@@ -122,99 +122,71 @@ models/
     ...
 ```
 
-The program never downloads models. `--model auto` prefers Qwen; it falls back to Whisper only
-when the Qwen folder does not exist. You can also point at any other local path:
+Or point at any local folder:
 
 ```powershell
-conda run --no-capture-output -n typeless_nano python app.py --model whisper --model-path D:\ApprovedModels\whisper-small.en
+python app.py --model whisper --model-path D:\ApprovedModels\whisper-small.en
 ```
 
-To pin and verify checkpoint checksums:
+To pin checksums once and verify them on every start:
 
 ```powershell
-conda run -n typeless_nano python scripts/model_sha256.py D:\ApprovedModels\whisper-small.en --write
-conda run --no-capture-output -n typeless_nano python app.py --model whisper --model-path D:\ApprovedModels\whisper-small.en --verify-checksums
+python scripts/model_sha256.py D:\ApprovedModels\whisper-small.en --write
+python app.py --model whisper --model-path D:\ApprovedModels\whisper-small.en --verify-checksums
 ```
 
-## Run
+## Privacy
 
-List the microphones first:
+- Runs with `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`; every model load uses
+  `local_files_only=True`.
+- Audio lives in RAM only. Neither audio nor transcripts are ever written to disk.
+- Logs hold state names, latency and error codes -- never what you said.
+- The foreground window is re-checked after transcription; text is typed only if it is still
+  the window you started in.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Console stays blank under Conda | Add `--no-capture-output` to `conda run`. |
+| `can't open file ... app.py` | Run from the project folder, not your home folder. |
+| Waveform stays flat while you talk | Wrong or muted mic. Run `--list-microphones`, then pass `--microphone`. |
+| Bars move while you are silent | Noisy room or high mic gain. Raise `meter_floor_db` in `dictation/config.py`. |
+| Text never appears in one specific app | Elevated (admin) apps reject input from normal apps. Run both at the same privilege level. |
+| First dictation is slow | The model is loading or warming up on CPU. Later ones are faster; a CUDA GPU helps most. |
+
+## Development
+
+Tests need Windows but no model:
 
 ```powershell
-conda run -n typeless_nano python app.py --list-microphones
+python -m unittest discover -s tests -v
+python scripts/dependency_gate.py
 ```
 
-Start the app:
+`requirements.txt` lists only the four company-approved direct dependencies (`sounddevice`,
+`pywin32`, `torch`, `transformers`); `dependency_gate.py` checks their exact versions and
+reports the transitive ones. NumPy is used directly but arrives transitively.
+
+End-to-end check with speech generated by the Windows SAPI voice. The temporary WAV is deleted
+afterwards and only latency and word count are printed:
 
 ```powershell
-conda run --no-capture-output -n typeless_nano python app.py
+python -m scripts.smoke_transcription --model whisper
 ```
 
-`--no-capture-output` matters: without it, `conda run` buffers the console output of
-long-running programs, which makes the app look like it never started.
+Manual checks before relying on a new machine:
 
-Or, inside an already-activated Conda environment:
+1. `dependency_gate.py` reports all four direct dependencies at the exact versions.
+2. `--list-microphones` shows the expected device.
+3. In Notepad, Right Alt starts and stops recording with the rising and falling cues.
+4. A silent or sub-250 ms recording logs `utterance_rejected` and shows "No speech detected".
+5. Switching windows right after stopping logs
+   `injection_skipped reason=foreground_window_changed` and shows the rescue panel.
+6. A recording past 60 seconds is stopped by the watchdog.
+7. Dictate a few times each in Outlook, Teams, Chrome and VS Code.
 
-```powershell
-python app.py
-```
+## Platform
 
-Usage:
-
-1. Wait for `Typeless Nano is ready.`
-2. Press Right Alt once; the recording waveform capsule appears.
-3. Speak English.
-4. Press Right Alt again, or click `✓`; the capsule switches to `Thinking`.
-5. Keep the original window in the foreground and wait for the text to be typed.
-6. Click `×` to discard the current recording; press `Ctrl+C` to stop the whole program.
-
-The program intercepts Right Alt only. F1, Left Alt and every other key are passed through
-unchanged to other tools and to the active application.
-
-Common options:
-
-```text
---model auto|qwen|whisper
---device auto|cpu|cuda
---microphone DEVICE_NAME_OR_INDEX
---mute-cues
---no-clipboard-fallback
---new-paragraph
---verify-checksums
-```
-
-## Tests
-
-The tests do not require a model checkpoint:
-
-```powershell
-conda run -n typeless_nano python -m unittest discover -s tests -v
-conda run -n typeless_nano python -m pip check
-```
-
-Once a Whisper model is in place, you can use the built-in Windows SAPI voice to generate
-temporary English speech and run a fully local ASR smoke test. The temporary WAV is deleted in
-a `finally` block, and the output contains only latency and word count -- never the transcript:
-
-```powershell
-conda run -n typeless_nano python -m scripts.smoke_transcription --model whisper
-```
-
-## Personal-PC smoke test
-
-Verify in this order:
-
-1. `scripts/dependency_gate.py` reports all four direct dependency versions as an exact match.
-2. `app.py --list-microphones` shows the expected device.
-3. Test press-once-to-start, press-again-to-stop with Right Alt in Notepad first.
-4. Confirm that starting a recording plays the rising cue and stopping plays the falling cue.
-5. A recording shorter than 250 ms, or one that stays silent, should produce only
-   `utterance_rejected`.
-6. Switching to another window immediately after recording should produce
-   `injection_skipped reason=foreground_window_changed`, with no text typed.
-7. A recording longer than 60 seconds is stopped automatically by the watchdog.
-8. Test several times each in Outlook, Teams, Chrome and VS Code.
-
-Some elevated programs do not accept `SendInput` from a lower-privilege process. When that
-happens, run Typeless Nano at the same integrity level as the target program; do not leave the
-whole tool running as Administrator permanently.
+Windows only. The hotkey (a Win32 low-level keyboard hook), text typing (`SendInput`), the
+non-activating overlay and the sound cues (`winsound`) all use Windows APIs directly.

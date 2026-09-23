@@ -2,44 +2,60 @@
 
 *[English](README.md) | 繁體中文*
 
-Windows 本機英文語音輸入 MVP。按一下 Right Alt 開始錄音，再按一下停止，
-以本機 Qwen3-ASR 或 Whisper 轉錄，最後將結果輸入原本的 active window。
+Windows 上的離線英文語音輸入工具。按一下 **Right Alt**，說話，再按一下 **Right Alt**，
+文字就會輸入到你原本所在的視窗。語音辨識完全在本機以 Whisper 或 Qwen3-ASR 執行，
+不會傳送任何資料，也不會在硬碟上保存任何內容。
 
-錄音時會在目前螢幕底部中央顯示一個不搶焦點的浮動膠囊：左側 `×` 取消，
-中央 waveform 顯示錄音中，右側 `✓` 可完成錄音。停止後會縮成
-`Thinking` 狀態，直到轉錄與輸入完成才消失。
+<p align="center">
+  <img src="docs/images/recording.png" width="176" alt="顯示即時波形的錄音膠囊">
+</p>
 
-進入錄音時會播放柔和的上升雙音，離開錄音時播放同一組下降雙音，取消則播放
-單一低音，接近 Discord 的 join／leave 感覺。提示音是啟動時合成的 sine tone，
-以 Python 內建 `winsound` 播放，不需要額外 dependency，也不附帶任何第三方
-音檔。開始提示音期間捕捉到的 microphone blocks 會在正式錄音前清除。
+## 功能
 
-PyWin32 312 沒有直接包裝 low-level hook 的三個 functions，因此
-`hotkey.py` 以 `ctypes` 呼叫原生 `SetWindowsHookExW`、`CallNextHookEx`
-及 `UnhookWindowsHookEx`；PyWin32 仍負責 Windows message loop、
-foreground window 與 session notification。
+- **一個鍵，切換錄音。** Right Alt 開始、再按停止。其他所有按鍵（包括 F1 和 Left Alt）
+  都原封不動地傳遞。
+- **輸入到原本的視窗。** 文字會送到開始錄音時位於前景的視窗。如果期間切換了視窗，
+  就不會輸入到錯誤的地方。
+- **不會弄丟你說的話。** 文字無法輸入時，會留在一個附 `Copy` 按鈕的小面板中，
+  直到你處理為止。
+- **即時波形。** 錄音膠囊顯示麥克風的真實音量，由右向左捲動，一眼就能確認麥克風
+  有收到你的聲音。
+- **完全離線。** 模型只從本機資料夾載入，執行期間不會發出任何網路請求。
+- **輕量。** 只有四個直接依賴、一個 Python 程序，不需要安裝程式。
 
-## Quick start
+## 畫面說明
 
-從零到可執行的最短路徑。Windows 上的 Python 3.12。
+| 狀態 | 外觀 | 意思 |
+|---|---|---|
+| 錄音中 | <img src="docs/images/recording.png" width="176" alt="錄音膠囊"> | 請說話，波形會跟著你的聲音變化。`×` 取消，`✓` 完成。 |
+| 轉錄中 | <img src="docs/images/thinking.png" width="146" alt="Thinking 膠囊"> | 正在轉錄，完成後立即輸入文字。 |
+| 沒有語音 | <img src="docs/images/no-speech.png" width="183" alt="沒有語音的提示"> | 錄音是靜音或太短，提示會自動消失。 |
+| 無處輸入 | <img src="docs/images/rescue.png" width="472" alt="附 Copy 按鈕的救援面板"> | 目標視窗已關閉或已切換。`Copy` 會把文字複製到剪貼簿。 |
+
+這些視窗都不會搶走焦點，你正在輸入的程式會保持在前景。狀態切換時會有簡短的提示音：
+開始時是上升的雙音，停止時是同一組下降的雙音，取消時是單一低音。
+
+## 快速開始
+
+需要 Windows 和 Python 3.12。
+
+**1. 安裝**
 
 ```powershell
 python -m venv .venv
-.venv\Scriptsctivate
+.venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-下載 Whisper model。`hf` CLI 隨 `huggingface_hub` 一起安裝，而它已經是
-`transformers` 的 dependency，pip 上一步就裝好了：
+**2. 取得模型**（唯一需要連網的步驟）
 
 ```powershell
 hf download openai/whisper-small.en --local-dir models\whisper-small.en
 ```
 
-若該機器無法連上 Hub，請從
-<https://huggingface.co/openai/whisper-small.en/tree/main> 手動下載檔案並放進
-`models\whisper-small.en`。除了 `.gitattributes` 以及給其他 framework 用的
-`.msgpack`／`.h5`／`.ot` weights 以外，其餘檔案都需要：
+那台電腦無法連到 Hub？請從 <https://huggingface.co/openai/whisper-small.en/tree/main>
+手動下載檔案到 `models\whisper-small.en`。需要以下檔案；`.gitattributes` 和
+`.msgpack` / `.h5` / `.ot` 權重檔可以略過：
 
 ```text
 config.json  generation_config.json  merges.txt  model.safetensors
@@ -47,16 +63,15 @@ normalizer.json  preprocessor_config.json  special_tokens_map.json
 tokenizer.json  tokenizer_config.json  vocab.json  added_tokens.json
 ```
 
-執行：
+**3. 執行**（在專案資料夾內執行，模型路徑是相對於它的）
 
 ```powershell
 python app.py
 ```
 
-程式本身不會下載任何東西——它以 `HF_HUB_OFFLINE=1` 執行，只從本機資料夾載入。
-上面的下載步驟是唯一一次連到 Hub。
+等到出現 `Typeless Nano is ready.`，點進任何文字輸入框，按 Right Alt。
 
-若偏好 Conda 而非 venv（完整說明見 [Environment](#environment)）：
+改用 Conda：
 
 ```powershell
 conda create -n typeless_nano python=3.12 pip -y
@@ -64,47 +79,35 @@ conda run -n typeless_nano python -m pip install -r requirements.txt
 conda run --no-capture-output -n typeless_nano python app.py
 ```
 
-## Safety and privacy
+請保留 `--no-capture-output`，否則 Conda 會暫存 console 輸出，程式看起來像當掉了。
 
-- Runtime 強制設定 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`。
-- 所有模型皆以 `local_files_only=True` 載入。
-- Audio 只存在 RAM；程式不寫入 audio 或 transcript。
-- Logs 只包含狀態、latency 與 error code，不包含 transcript。
-- ASR 完成後會再次核對 foreground window；若視窗已改變便不輸入，
-  但 transcript 不會被丟棄，而是保留在浮動視窗（見下文）。
-- `SendInput` 失敗時預設將文字複製到 clipboard，可用
-  `--no-clipboard-fallback` 關閉。
+## 使用方式
 
-## 沒有地方可以輸入時
+1. 把游標放在要輸入文字的位置。
+2. 按 **Right Alt**，說英文。
+3. 再按一次 **Right Alt**，或點 `✓`。
+4. 在文字出現之前，停留在同一個視窗。
 
-若 transcript 無法輸入——原本的視窗已消失，或 ASR 期間 foreground window 改變了
-——文字不會再遺失。螢幕下方會出現一個浮動視窗顯示 transcript，按 `Copy` 會複製
-並關閉視窗，按 `×` 則直接關閉且不動 clipboard。此視窗不搶焦點，也沒有 timeout，
-會一直等你處理。
+點 `×` 可捨棄這次錄音。錄音超過 60 秒會自動停止，並照常轉錄。在 console 按
+`Ctrl+C` 結束程式。
 
-過長的 transcript 在視窗中會被截斷顯示，但 `Copy` 一定會複製完整文字。
-視窗只存在記憶體中；若在開啟狀態下以 `Ctrl+C` 結束程式，內容會遺失。
+## 選項
 
-若一次錄音完全沒有產生文字——靜音、錄音太短，或 ASR 結果為空——則會改為顯示
-一個小小的深色 `No speech detected` 提示，約 1.7 秒後自動消失。不需要任何操作，
-也沒有東西需要救回。
+| 選項 | 作用 |
+|---|---|
+| `--model auto\|qwen\|whisper` | 選擇模型。`auto`（預設）優先使用 Qwen；Qwen 不存在或載入失敗時改用 Whisper。 |
+| `--model-path PATH` | 從其他資料夾載入所選的模型。 |
+| `--device auto\|cpu\|cuda` | 模型執行的裝置。CUDA 記憶體不足時會退回 CPU。 |
+| `--microphone NAME_OR_INDEX` | 指定麥克風，參見 `--list-microphones`。 |
+| `--list-microphones` | 列出輸入裝置後結束。 |
+| `--mute-cues` | 關閉開始／停止提示音。 |
+| `--no-clipboard-fallback` | 輸入失敗時，不把文字複製到剪貼簿。 |
+| `--new-paragraph` | 把說出的「new paragraph」轉成換行。 |
+| `--verify-checksums` | 載入前以固定的 SHA-256 雜湊檢查模型檔案。 |
 
-## Environment
+## 模型
 
-```powershell
-conda create -n typeless_nano python=3.12 pip -y
-conda run -n typeless_nano python -m pip install -r requirements.txt
-conda run -n typeless_nano python scripts/dependency_gate.py
-```
-
-`requirements.txt` 只有四個公司批准的 direct dependencies。NumPy 由
-`sounddevice`、`torch` 或 `transformers` 的 dependency graph 安裝，程式會直接使用
-它處理 in-memory audio。`dependency_gate.py` 會顯示實際 NumPy 版本及
-Transformers 宣告的 transitive requirements，供公司 allowlist 檢查。
-
-## Local model layout
-
-模型 checkpoint 必須先經批准，然後放進以下其中一個本機 folder：
+程式永遠不會下載模型。請把核准的 checkpoint 放在這裡：
 
 ```text
 models/
@@ -118,98 +121,70 @@ models/
     ...
 ```
 
-程式不會下載模型。`--model auto` 會優先使用 Qwen；若 Qwen folder 不存在，
-才使用 Whisper。亦可指定其他本機路徑：
+或指向任何本機資料夾：
 
 ```powershell
-conda run --no-capture-output -n typeless_nano python app.py --model whisper --model-path D:\ApprovedModels\whisper-small.en
+python app.py --model whisper --model-path D:\ApprovedModels\whisper-small.en
 ```
 
-如要固定及驗證 checkpoint checksum：
+先固定一次 checksum，之後每次啟動都驗證：
 
 ```powershell
-conda run -n typeless_nano python scripts/model_sha256.py D:\ApprovedModels\whisper-small.en --write
-conda run --no-capture-output -n typeless_nano python app.py --model whisper --model-path D:\ApprovedModels\whisper-small.en --verify-checksums
+python scripts/model_sha256.py D:\ApprovedModels\whisper-small.en --write
+python app.py --model whisper --model-path D:\ApprovedModels\whisper-small.en --verify-checksums
 ```
 
-## Run
+## 隱私
 
-先列出 microphone：
+- 以 `HF_HUB_OFFLINE=1` 和 `TRANSFORMERS_OFFLINE=1` 執行；所有模型載入都使用
+  `local_files_only=True`。
+- 音訊只存在記憶體中，音訊和轉錄文字都不會寫入硬碟。
+- 日誌只記錄狀態名稱、延遲和錯誤代碼，絕不記錄你說了什麼。
+- 轉錄完成後會重新檢查前景視窗，只有仍是開始錄音時的那個視窗才會輸入文字。
+
+## 疑難排解
+
+| 症狀 | 解決方式 |
+|---|---|
+| 用 Conda 執行時 console 一片空白 | 在 `conda run` 加上 `--no-capture-output`。 |
+| `can't open file ... app.py` | 要在專案資料夾內執行，不是在使用者主資料夾。 |
+| 說話時波形一直是平的 | 麥克風選錯或被靜音。執行 `--list-microphones`，再用 `--microphone` 指定。 |
+| 安靜時波形仍在跳動 | 環境吵雜或麥克風增益太高。調高 `dictation/config.py` 裡的 `meter_floor_db`。 |
+| 某個程式永遠收不到文字 | 以系統管理員權限執行的程式會拒絕一般程式的輸入。讓兩者以相同權限執行。 |
+| 第一次聽寫很慢 | 模型正在 CPU 上載入或暖機，之後會變快；有 CUDA GPU 幫助最大。 |
+
+## 開發
+
+測試需要 Windows，但不需要模型：
 
 ```powershell
-conda run -n typeless_nano python app.py --list-microphones
+python -m unittest discover -s tests -v
+python scripts/dependency_gate.py
 ```
 
-啟動：
+`requirements.txt` 只列出公司核准的四個直接依賴（`sounddevice`、`pywin32`、`torch`、
+`transformers`）；`dependency_gate.py` 會檢查它們的確切版本，並列出間接依賴。
+NumPy 在程式中直接使用，但它是以間接依賴的方式安裝的。
+
+用 Windows SAPI 語音產生的語音做端到端檢查。暫存的 WAV 事後會刪除，輸出只有延遲和
+字數：
 
 ```powershell
-conda run --no-capture-output -n typeless_nano python app.py
+python -m scripts.smoke_transcription --model whisper
 ```
 
-`--no-capture-output` 很重要：沒有它時，`conda run` 會暫存長時間程式的
-console output，看起來像程式沒有啟動。
+在新電腦上正式使用前的手動檢查：
 
-或在已啟用的 Conda environment：
+1. `dependency_gate.py` 回報四個直接依賴都是確切版本。
+2. `--list-microphones` 列出預期的裝置。
+3. 在記事本中，Right Alt 能開始與停止錄音，並播放上升與下降提示音。
+4. 靜音或短於 250 ms 的錄音會記錄 `utterance_rejected`，並顯示「No speech detected」。
+5. 停止錄音後立刻切換視窗，會記錄
+   `injection_skipped reason=foreground_window_changed` 並顯示救援面板。
+6. 超過 60 秒的錄音會被 watchdog 停止。
+7. 在 Outlook、Teams、Chrome 和 VS Code 各聽寫幾次。
 
-```powershell
-python app.py
-```
+## 平台
 
-操作：
-
-1. 等待 `Typeless Nano is ready.`
-2. 按一下 Right Alt；錄音 waveform 膠囊出現。
-3. 說英文。
-4. 再按一下 Right Alt，或點 `✓`；膠囊會切換成 `Thinking`。
-5. 保持原本視窗在 foreground，等待文字輸入。
-6. 點 `×` 可放棄目前錄音；按 `Ctrl+C` 可停止整個程式。
-
-程式只攔截 Right Alt。F1、Left Alt 與其他 keys 都會原樣傳給其他工具及
-active application。
-
-常用參數：
-
-```text
---model auto|qwen|whisper
---device auto|cpu|cuda
---microphone DEVICE_NAME_OR_INDEX
---mute-cues
---no-clipboard-fallback
---new-paragraph
---verify-checksums
-```
-
-## Tests
-
-測試不需要 model checkpoint：
-
-```powershell
-conda run -n typeless_nano python -m unittest discover -s tests -v
-conda run -n typeless_nano python -m pip check
-```
-
-如已放好 Whisper model，可用 Windows 內建 SAPI 產生臨時英文語音，做一次
-完全本機 ASR smoke test。臨時 WAV 會在 `finally` 中刪除，輸出只包含
-latency 與 word count，不會列出 transcript：
-
-```powershell
-conda run -n typeless_nano python -m scripts.smoke_transcription --model whisper
-```
-
-## Personal-PC smoke test
-
-建議依序驗證：
-
-1. `scripts/dependency_gate.py` 顯示四個 direct dependency 版本完全相符。
-2. `app.py --list-microphones` 可看到預期裝置。
-3. 先在 Notepad 測試 Right Alt 的「按一下開始、再按一下停止」。
-4. 確認開始錄音為上升提示音，停止錄音為下降提示音。
-5. 錄音少於 250 ms 或保持靜音時，應只看到 `utterance_rejected`。
-6. 錄音後立即切換到另一個視窗，應看到
-   `injection_skipped reason=foreground_window_changed`，且不輸入文字。
-7. 錄音超過 60 秒會由 watchdog 自動停止。
-8. 在 Outlook、Teams、Chrome、VS Code 各測試多次。
-
-某些提高權限執行的程式不接受低權限 process 的 `SendInput`。遇到這種情況，
-請讓 Typeless Nano 與目標程式使用相同 integrity level；不要把整個工具長期以
-Administrator 執行。
+僅支援 Windows。熱鍵（Win32 low-level keyboard hook）、文字輸入（`SendInput`）、
+不搶焦點的浮窗和提示音（`winsound`）都直接使用 Windows API。

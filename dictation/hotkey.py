@@ -12,6 +12,7 @@ import win32gui
 import win32ts
 
 from dictation.events import AppEvent, EventKind
+from dictation.platform_common import RightAltToggleState
 
 LOGGER = logging.getLogger("dictation.hotkey")
 
@@ -54,33 +55,6 @@ class KBDLLHOOKSTRUCT(ctypes.Structure):
         ("time", wintypes.DWORD),
         ("dwExtraInfo", wintypes.WPARAM),
     )
-
-
-class RightAltToggleState:
-    def __init__(self) -> None:
-        self.physically_down = False
-        self.recording = False
-
-    def key_down(self) -> EventKind | None:
-        if self.physically_down:
-            return None
-        self.physically_down = True
-        self.recording = not self.recording
-        return (
-            EventKind.START_RECORDING
-            if self.recording
-            else EventKind.STOP_RECORDING
-        )
-
-    def key_up(self) -> None:
-        self.physically_down = False
-
-    def set_recording(self, active: bool) -> None:
-        self.recording = active
-
-    def reset(self) -> None:
-        self.physically_down = False
-        self.recording = False
 
 
 class WindowsHotkeyHook:

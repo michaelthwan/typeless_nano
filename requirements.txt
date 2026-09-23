@@ -1,5 +1,5 @@
 sounddevice==0.5.5
-pywin32==312
+pywin32==312; sys_platform == "win32"
 torch==2.9.0
 transformers==5.14.1
 

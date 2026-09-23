@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
-from dataclasses import dataclass
 
 import win32clipboard
 import win32con
 import win32gui
+
+from dictation.platform_common import InjectionResult
 
 INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
@@ -64,13 +65,6 @@ _USER32.SendInput.argtypes = (
     ctypes.c_int,
 )
 _USER32.SendInput.restype = wintypes.UINT
-
-
-@dataclass(frozen=True, slots=True)
-class InjectionResult:
-    injected: bool
-    copied_to_clipboard: bool = False
-    reason: str = ""
 
 
 class TextInjector:

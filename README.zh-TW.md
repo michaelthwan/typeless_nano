@@ -186,5 +186,29 @@ python -m scripts.smoke_transcription --model whisper
 
 ## 平台
 
-僅支援 Windows。熱鍵（Win32 low-level keyboard hook）、文字輸入（`SendInput`）、
-不搶焦點的浮窗和提示音（`winsound`）都直接使用 Windows API。
+正式支援的平台是 Windows。熱鍵（Win32 low-level keyboard hook）、文字輸入
+（`SendInput`）、不搶焦點的浮窗和提示音（`winsound`）都直接使用 Windows API。
+
+### macOS（實驗性）
+
+`experiment/macos` 分支有第一版 macOS 支援。熱鍵改用 **Right Option**，以 CoreGraphics
+按鍵事件輸入文字，提示音透過 `sounddevice` 播放；不新增任何依賴（macOS API 以 `ctypes`
+呼叫，不安裝 `pywin32`）。尚未完成的部分：
+
+- 還沒有浮動膠囊，錄音與轉錄狀態只能靠提示音分辨。
+- 沒有救援面板：無法輸入的文字會改為複製到剪貼簿。
+- 睡眠或鎖定螢幕時不會自動取消錄音；60 秒 watchdog 仍然有效。
+- 密碼欄位和 Terminal 的「安全鍵盤輸入」會擋下輸入的文字，此時文字會改為複製到剪貼簿。
+- 只在 CPU 上執行（尚未接上 Apple GPU）。
+
+安裝步驟與 Windows 相同，另外需要兩項權限。在 **系統設定 > 隱私權與安全性** 中，
+把你用來啟動程式的終端機（Terminal、iTerm、VS Code）加入 **輔助使用** 和
+**輸入監控**，並在詢問時允許使用 **麥克風**。授權後請重新開啟終端機。缺少這些權限時，
+程式會以 `keyboard_hook_start_failed` 結束。
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python app.py
+```

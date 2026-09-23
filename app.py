@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import queue
 import sys
 from pathlib import Path
+from typing import Any
 
 # These must be set before Transformers or huggingface_hub is imported.
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -17,14 +19,14 @@ from dictation.audio import AudioRecorder
 from dictation.config import AppConfig
 from dictation.controller import DictationController
 from dictation.cues import SoundCuePlayer
-from dictation.hotkey import WindowsHotkeyHook
-from dictation.inject import TextInjector
-from dictation.overlay import RecordingOverlay
+from dictation.events import AppEvent
+
+SUPPORTED_PLATFORMS = ("win32", "darwin")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Offline Windows toggle-to-record English dictation."
+        description="Offline toggle-to-record English dictation (Windows, macOS)."
     )
     parser.add_argument(
         "--model",
@@ -59,7 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-clipboard-fallback",
         action="store_true",
-        help="Do not copy text to the clipboard if SendInput fails.",
+        help="Do not copy text to the clipboard if typing it fails.",
     )
     parser.add_argument(
         "--mute-cues",
@@ -93,6 +95,38 @@ def _parse_microphone(value: str | None) -> str | int | None:
         return value
 
 
+def build_platform(
+    events: queue.Queue[AppEvent], config: AppConfig, recorder: AudioRecorder
+) -> tuple[Any, Any, Any, str]:
+    """Hotkey, injector, overlay and hotkey label for the running OS.
+
+    Platform modules are imported here, not at the top, so neither backend's
+    OS bindings are loaded on the other platform.
+    """
+    if sys.platform == "darwin":
+        from dictation.macos.hotkey import MacHotkeyTap
+        from dictation.macos.inject import MacTextInjector
+        from dictation.macos.overlay import ConsoleOverlay
+
+        return (
+            MacHotkeyTap(events),
+            MacTextInjector(clipboard_fallback=config.clipboard_fallback),
+            ConsoleOverlay(),
+            "Right Option",
+        )
+
+    from dictation.hotkey import WindowsHotkeyHook
+    from dictation.inject import TextInjector
+    from dictation.overlay import RecordingOverlay
+
+    return (
+        WindowsHotkeyHook(events),
+        TextInjector(clipboard_fallback=config.clipboard_fallback),
+        RecordingOverlay(events, level_source=lambda: recorder.level),
+        "Right Alt",
+    )
+
+
 def configure_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -102,8 +136,8 @@ def configure_logging() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    if sys.platform != "win32":
-        print("This application requires Windows.", file=sys.stderr)
+    if sys.platform not in SUPPORTED_PLATFORMS:
+        print("This application requires Windows or macOS.", file=sys.stderr)
         return 2
 
     configure_logging()
@@ -141,10 +175,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     recorder = AudioRecorder(config)
-    injector = TextInjector(clipboard_fallback=config.clipboard_fallback)
     cues = SoundCuePlayer(enabled=config.sound_cues)
-    hotkey = WindowsHotkeyHook(event_queue)
-    overlay = RecordingOverlay(event_queue, level_source=lambda: recorder.level)
+    hotkey, injector, overlay, key_name = build_platform(event_queue, config, recorder)
     controller = DictationController(
         config=config,
         events=event_queue,
@@ -157,7 +189,10 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     print("Typeless Nano is ready.", flush=True)
-    print("Press Right Alt once to record; press it again to transcribe.", flush=True)
+    print(
+        f"Press {key_name} once to record; press it again to transcribe.",
+        flush=True,
+    )
     print("Press Ctrl+C to stop.", flush=True)
 
     try:

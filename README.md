@@ -188,5 +188,31 @@ Manual checks before relying on a new machine:
 
 ## Platform
 
-Windows only. The hotkey (a Win32 low-level keyboard hook), text typing (`SendInput`), the
-non-activating overlay and the sound cues (`winsound`) all use Windows APIs directly.
+Windows is the supported platform. The hotkey (a Win32 low-level keyboard hook), text typing
+(`SendInput`), the non-activating overlay and the sound cues (`winsound`) all use Windows APIs
+directly.
+
+### macOS (experimental)
+
+The `experiment/macos` branch has a first macOS backend. It uses **Right Option** as the
+hotkey, types with CoreGraphics key events and plays the cues through `sounddevice`; it adds no
+dependency (macOS APIs are called through `ctypes`, `pywin32` is skipped). What is missing:
+
+- No floating capsule yet -- the sound cues are the only recording/Thinking feedback.
+- No rescue panel: text that cannot be typed is copied to the clipboard instead.
+- No cancel on sleep or screen lock; the 60-second watchdog still applies.
+- Password fields and Terminal's Secure Keyboard Entry block typed text; the text goes to the
+  clipboard instead.
+- Runs on CPU (Apple GPU support is not wired up).
+
+Setup is the same as on Windows, plus two permissions. In **System Settings > Privacy &
+Security**, allow the terminal app you launch from (Terminal, iTerm, VS Code) under both
+**Accessibility** and **Input Monitoring**, and allow the **Microphone** when asked. Restart the
+terminal after granting them. Without them the app exits with `keyboard_hook_start_failed`.
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python app.py
+```

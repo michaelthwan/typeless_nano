@@ -4,8 +4,15 @@ import io
 import math
 import struct
 import wave
-import winsound
 from collections.abc import Sequence
+
+import numpy as np
+import sounddevice as sd
+
+try:
+    import winsound
+except ImportError:  # macOS: cues play through sounddevice instead.
+    winsound = None
 
 # A Discord-style pair of soft two-note cues: a rising "join" on enter and a
 # falling "leave" on exit. These are synthesised here rather than shipped as
@@ -115,6 +122,25 @@ def render_cue_wav(
     return stream.getvalue()
 
 
+def wav_to_samples(wav: bytes) -> tuple[np.ndarray, int]:
+    """Decode a 16-bit mono WAV from render_cue_wav into float32 samples."""
+    with wave.open(io.BytesIO(wav), "rb") as handle:
+        rate = handle.getframerate()
+        frames = handle.readframes(handle.getnframes())
+    samples = np.frombuffer(frames, dtype="<i2").astype(np.float32) / 32768.0
+    return samples, rate
+
+
+def _play_with_sounddevice(wav: bytes) -> None:
+    # Blocking, for the same reason winsound playback is synchronous.
+    samples, rate = wav_to_samples(wav)
+    try:
+        sd.play(samples, rate, blocking=True)
+    except Exception:
+        # No output device must never break dictation.
+        pass
+
+
 class SoundCuePlayer:
     """Short synchronous cues; never called from the keyboard hook thread.
 
@@ -146,6 +172,9 @@ class SoundCuePlayer:
 
     def _play(self, notes: Sequence[Note]) -> None:
         if not self.enabled:
+            return
+        if winsound is None:
+            _play_with_sounddevice(self._wav_for(notes))
             return
         try:
             winsound.PlaySound(self._wav_for(notes), winsound.SND_MEMORY)

@@ -11,6 +11,9 @@ DIRECT = {
     "torch": "2.9.0",
     "transformers": "5.14.1",
 }
+# pywin32 has no macOS build; the macOS backend uses ctypes instead.
+if sys.platform != "win32":
+    del DIRECT["pywin32"]
 
 
 def main() -> int:

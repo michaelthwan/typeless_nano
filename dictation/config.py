@@ -12,8 +12,9 @@ DEFAULT_VOCABULARY_PROMPT = (
 
 @dataclass(frozen=True, slots=True)
 class AppConfig:
-    model: str = "auto"
+    model: str = "moonshine"
     model_path: Path | None = None
+    moonshine_path: Path = Path("models/moonshine-streaming-small")
     qwen_path: Path = Path("models/qwen3-asr-0.6b-hf")
     whisper_path: Path = Path("models/whisper-small.en")
     device: str = "auto"

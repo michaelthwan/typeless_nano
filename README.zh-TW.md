@@ -3,7 +3,7 @@
 *[English](README.md) | 繁體中文*
 
 Windows 上的離線英文語音輸入工具。按一下 **Right Alt**，說話，再按一下 **Right Alt**，
-文字就會輸入到你原本所在的視窗。語音辨識完全在本機以 Whisper 或 Qwen3-ASR 執行，
+文字就會輸入到你原本所在的視窗。語音辨識完全在本機以 Moonshine Streaming（預設）、Whisper 或 Qwen3-ASR 執行，
 不會傳送任何資料，也不會在硬碟上保存任何內容。
 
 <p align="center">
@@ -50,18 +50,27 @@ pip install -r requirements.txt
 **2. 取得模型**（唯一需要連網的步驟）
 
 ```powershell
+hf download moonshine-ai/moonshine-streaming-small --local-dir models\moonshine-streaming-small
+```
+
+那台電腦無法連到 Hub？請從
+<https://huggingface.co/moonshine-ai/moonshine-streaming-small/tree/main>
+手動下載檔案到 `models\moonshine-streaming-small`。需要以下檔案；`.gitattributes` 可以略過：
+
+```text
+config.json  generation_config.json  model.safetensors  preprocessor_config.json
+processor_config.json  special_tokens_map.json  tokenizer.json  tokenizer_config.json
+```
+
+選用的替代方案：`moonshine-ai/moonshine-streaming-medium`（較準確但較慢，用 `--model-path`
+載入），或 Whisper（用 `--model whisper` 載入）：
+
+```powershell
 hf download openai/whisper-small.en --local-dir models\whisper-small.en
 ```
 
-那台電腦無法連到 Hub？請從 <https://huggingface.co/openai/whisper-small.en/tree/main>
-手動下載檔案到 `models\whisper-small.en`。需要以下檔案；`.gitattributes` 和
-`.msgpack` / `.h5` / `.ot` 權重檔可以略過：
-
-```text
-config.json  generation_config.json  merges.txt  model.safetensors
-normalizer.json  preprocessor_config.json  special_tokens_map.json
-tokenizer.json  tokenizer_config.json  vocab.json  added_tokens.json
-```
+Whisper 的檔案清單在 <https://huggingface.co/openai/whisper-small.en/tree/main>；
+`.gitattributes` 和 `.msgpack` / `.h5` / `.ot` 權重檔可以略過。
 
 **3. 執行**（在專案資料夾內執行，模型路徑是相對於它的）
 
@@ -95,7 +104,7 @@ conda run --no-capture-output -n typeless_nano python app.py
 
 | 選項 | 作用 |
 |---|---|
-| `--model auto\|qwen\|whisper` | 選擇模型。`auto`（預設）優先使用 Qwen；Qwen 不存在或載入失敗時改用 Whisper。 |
+| `--model moonshine\|auto\|qwen\|whisper` | 選擇模型。`moonshine`（預設）載入 `models/moonshine-streaming-small`；`auto` 優先使用 Qwen，Qwen 不存在或載入失敗時改用 Whisper。 |
 | `--model-path PATH` | 從其他資料夾載入所選的模型。 |
 | `--device auto\|cpu\|cuda` | 模型執行的裝置。CUDA 記憶體不足時會退回 CPU。 |
 | `--microphone NAME_OR_INDEX` | 指定麥克風，參見 `--list-microphones`。 |
@@ -111,6 +120,10 @@ conda run --no-capture-output -n typeless_nano python app.py
 
 ```text
 models/
+  moonshine-streaming-small/
+    config.json
+    model.safetensors
+    ...
   qwen3-asr-0.6b-hf/
     config.json
     model.safetensors
@@ -170,7 +183,7 @@ NumPy 在程式中直接使用，但它是以間接依賴的方式安裝的。
 字數：
 
 ```powershell
-python -m scripts.smoke_transcription --model whisper
+python -m scripts.smoke_transcription
 ```
 
 在新電腦上正式使用前的手動檢查：

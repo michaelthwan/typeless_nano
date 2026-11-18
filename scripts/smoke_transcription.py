@@ -64,7 +64,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Offline end-to-end ASR smoke test using Windows SAPI audio."
     )
-    parser.add_argument("--model", choices=("qwen", "whisper"), default="whisper")
+    parser.add_argument(
+        "--model", choices=("moonshine", "qwen", "whisper"), default="moonshine"
+    )
     parser.add_argument("--model-path", type=Path)
     args = parser.parse_args()
 

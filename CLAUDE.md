@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project
 
 Typeless Nano: a Windows-only, fully offline English dictation tool. Press Right Alt once to
-start recording, press again to stop; local Whisper or Qwen3-ASR transcribes and the text is
+start recording, press again to stop; local Moonshine Streaming (default), Whisper or Qwen3-ASR transcribes and the text is
 typed into whatever window was in the foreground when recording started.
 
 `PRD.md` is the authoritative spec; `README.md` is the user-facing guide.
@@ -61,10 +61,11 @@ the app looks dead):
 conda run --no-capture-output -n typeless_nano python app.py
 ```
 
-End-to-end ASR smoke test using Windows SAPI-generated speech (needs a local Whisper model):
+End-to-end ASR smoke test using Windows SAPI-generated speech (needs a local model; the
+default backend is Moonshine, `--model whisper` selects another):
 
 ```powershell
-conda run -n typeless_nano python -m scripts.smoke_transcription --model whisper
+conda run -n typeless_nano python -m scripts.smoke_transcription
 ```
 
 Models live under `models/` (gitignored) and are never downloaded by the app.
@@ -102,9 +103,12 @@ and hands the buffer to the worker -> worker transcribes, runs `clean_transcript
 - `dictation/inject.py`: builds `INPUT` structs by hand for Unicode `SendInput`; on failure it
   falls back to the clipboard unless `--no-clipboard-fallback`. Injection into a
   higher-integrity process will fail -- that is expected, not a bug to work around by elevating.
-- `dictation/asr/factory.py`: `--model auto` prefers Qwen, falls back to Whisper if the Qwen
-  directory is missing *or* Qwen initialization raises. Both backends also fall back CUDA -> CPU
-  on `torch.cuda.OutOfMemoryError`, at load time and mid-transcription.
+- `dictation/asr/factory.py`: the default `--model moonshine` loads
+  `models/moonshine-streaming-small` and is not part of the auto chain. `--model-path` without
+  `--model` infers the backend from the directory (`app.py` maps it to `auto`). `--model auto`
+  prefers Qwen, falls back to Whisper if the Qwen directory is missing *or* Qwen initialization
+  raises. All backends (Moonshine too) also fall back CUDA -> CPU on
+  `torch.cuda.OutOfMemoryError`, at load time and mid-transcription.
 - `dictation/overlay.py` hosts two windows on one Tk thread: the recording capsule (the Tk
   root) and the rescue panel (a `Toplevel`). Both are non-activating and are driven by the same
   command queue. They are independent -- `hide()` hides only the capsule, which is what lets the

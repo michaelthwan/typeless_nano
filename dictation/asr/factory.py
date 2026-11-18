@@ -27,6 +27,8 @@ def select_model(config: AppConfig) -> ModelSelection:
             backend = infer_backend_from_directory(config.model_path)
         return ModelSelection(backend, config.model_path)
 
+    if config.model == "moonshine":
+        return ModelSelection("moonshine", config.moonshine_path)
     if config.model == "qwen":
         return ModelSelection("qwen", config.qwen_path)
     if config.model == "whisper":
@@ -47,10 +49,14 @@ def infer_backend_from_directory(path: Path) -> str:
     config_path = path / "config.json"
     if config_path.is_file():
         text = config_path.read_text(encoding="utf-8", errors="ignore").lower()
+        if "moonshine" in text:
+            return "moonshine"
         if "qwen3_asr" in text:
             return "qwen"
         if "whisper" in text:
             return "whisper"
+    if "moonshine" in name:
+        return "moonshine"
     if "qwen" in name:
         return "qwen"
     if "whisper" in name:
@@ -138,6 +144,10 @@ def _load_backend(
             prompt=config.vocabulary_prompt,
             max_new_tokens=config.max_new_tokens,
         )
+    if backend == "moonshine":
+        from dictation.asr.moonshine import MoonshineASR
+
+        return MoonshineASR(model_path, device)
     if backend == "whisper":
         from dictation.asr.whisper import WhisperASR
 

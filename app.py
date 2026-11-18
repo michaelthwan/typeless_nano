@@ -30,14 +30,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--model",
-        choices=("auto", "qwen", "whisper"),
-        default="auto",
-        help="ASR backend. auto prefers Qwen when both local models exist.",
+        choices=("moonshine", "auto", "qwen", "whisper"),
+        default=None,
+        help=(
+            "ASR backend. Default is moonshine, or the backend inferred from "
+            "--model-path when that is given. auto prefers Qwen and falls "
+            "back to Whisper."
+        ),
     )
     parser.add_argument(
         "--model-path",
         type=Path,
         help="Override the local model directory for the selected backend.",
+    )
+    parser.add_argument(
+        "--moonshine-path",
+        type=Path,
+        default=Path("models/moonshine-streaming-small"),
     )
     parser.add_argument(
         "--qwen-path",
@@ -148,8 +157,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = AppConfig(
-        model=args.model,
+        model=args.model or ("auto" if args.model_path else "moonshine"),
         model_path=args.model_path,
+        moonshine_path=args.moonshine_path,
         qwen_path=args.qwen_path,
         whisper_path=args.whisper_path,
         device=args.device,

@@ -35,7 +35,7 @@ Version 1 includes:
 - Thinking floating capsule shown during ASR
 - A rising cue plays on entering recording, a falling cue on leaving recording
 - Microphone recording
-- Qwen3-ASR / Whisper local transcription
+- Moonshine Streaming / Qwen3-ASR / Whisper local transcription
 - Automatic input into the active application
 - Basic error handling
 - `Ctrl+C` stops the program
@@ -72,7 +72,7 @@ Purpose:
 | `sounddevice` | Record 16 kHz mono audio from the microphone |
 | `pywin32` | Listen for Right Alt, get the active window, inject text |
 | `torch` | Run the ASR model on CPU/GPU |
-| `transformers` | Load, preprocess, and decode with Qwen3-ASR/Whisper |
+| `transformers` | Load, preprocess, and decode with Moonshine/Qwen3-ASR/Whisper |
 
 Explicitly not used:
 
@@ -359,6 +359,8 @@ If Qwen:
 then use Qwen as the production model.
 
 Otherwise, use Whisper small.en.
+
+Update: the default is now Moonshine Streaming (`models/moonshine-streaming-small`, loaded with `MoonshineStreamingForConditionalGeneration`) because it is faster on CPU. Measured on a 12-thread desktop CPU (fp32, SAPI synthetic speech), for 2.4 / 8.2 / 12.9 s clips: whisper-small.en 905 / 1762 / 2183 ms, moonshine-streaming-small 191 / 779 / 1209 ms, moonshine-streaming-medium 366 / 1323 / 1990 ms. Accuracy was only checked on 3 synthetic sentences: all three models were comparable, but Moonshine misheard "PySpark". Qwen and Whisper remain selectable with `--model`; `auto` is unchanged and does not include Moonshine.
 
 ## 8. Model benchmark
 

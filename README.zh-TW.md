@@ -53,6 +53,12 @@ pip install -r requirements.txt
 hf download moonshine-ai/moonshine-streaming-small --local-dir models\moonshine-streaming-small
 ```
 
+`hf` 指令來自 `huggingface_hub`，`transformers` 會一併安裝它。使用 Conda 時，在前面加上 `conda run`：
+
+```powershell
+conda run -n typeless_nano hf download moonshine-ai/moonshine-streaming-small --local-dir models\moonshine-streaming-small
+```
+
 那台電腦無法連到 Hub？請從
 <https://huggingface.co/moonshine-ai/moonshine-streaming-small/tree/main>
 手動下載檔案到 `models\moonshine-streaming-small`。需要以下檔案；`.gitattributes` 可以略過：
@@ -62,11 +68,19 @@ config.json  generation_config.json  model.safetensors  preprocessor_config.json
 processor_config.json  special_tokens_map.json  tokenizer.json  tokenizer_config.json
 ```
 
-選用的替代方案：`moonshine-ai/moonshine-streaming-medium`（較準確但較慢，用 `--model-path`
-載入），或 Whisper（用 `--model whisper` 載入）：
+選用：`moonshine-ai/moonshine-streaming-medium` 較準確但較慢（約 1 GB）。
+下載後，用 `--model-path` 執行：
+
+```powershell
+hf download moonshine-ai/moonshine-streaming-medium --local-dir models\moonshine-streaming-medium
+python app.py --model-path models\moonshine-streaming-medium
+```
+
+選用：Whisper。下載後，用 `--model whisper` 執行：
 
 ```powershell
 hf download openai/whisper-small.en --local-dir models\whisper-small.en
+python app.py --model whisper
 ```
 
 Whisper 的檔案清單在 <https://huggingface.co/openai/whisper-small.en/tree/main>；

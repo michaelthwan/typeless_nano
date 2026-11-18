@@ -54,6 +54,12 @@ pip install -r requirements.txt
 hf download moonshine-ai/moonshine-streaming-small --local-dir models\moonshine-streaming-small
 ```
 
+`hf` ships with `huggingface_hub`, which `transformers` installs. Under Conda, prefix it:
+
+```powershell
+conda run -n typeless_nano hf download moonshine-ai/moonshine-streaming-small --local-dir models\moonshine-streaming-small
+```
+
 No Hub access on that machine? Download the files by hand from
 <https://huggingface.co/moonshine-ai/moonshine-streaming-small/tree/main> into
 `models\moonshine-streaming-small`. You need these; skip `.gitattributes`:
@@ -63,11 +69,19 @@ config.json  generation_config.json  model.safetensors  preprocessor_config.json
 processor_config.json  special_tokens_map.json  tokenizer.json  tokenizer_config.json
 ```
 
-Optional alternatives: `moonshine-ai/moonshine-streaming-medium` (more accurate, slower; run it
-with `--model-path`), or Whisper (run it with `--model whisper`):
+Optional: `moonshine-ai/moonshine-streaming-medium` is more accurate but slower (about 1 GB).
+Download it, then run it with `--model-path`:
+
+```powershell
+hf download moonshine-ai/moonshine-streaming-medium --local-dir models\moonshine-streaming-medium
+python app.py --model-path models\moonshine-streaming-medium
+```
+
+Optional: Whisper. Download it, then run it with `--model whisper`:
 
 ```powershell
 hf download openai/whisper-small.en --local-dir models\whisper-small.en
+python app.py --model whisper
 ```
 
 The Whisper files are listed at
